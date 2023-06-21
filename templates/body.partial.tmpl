@@ -1,0 +1,36 @@
+{{ define "body" }}
+    <div class="row justify-content-md-center" id="repositories">
+	<div class="col-md-10">
+	    {{ if .Repositories }}
+		<h2 class="text-center">Showing results 1-30 of {{ .TotalCount }} for query: "{{ .Query }}"</h2>
+		<hr>
+		<table class="table">
+		    <thead>
+			<tr>
+			    <th scope="col">Name</th>
+			    <th scope="col">Owner</th>
+			    <th scope="col">Description</th>
+			</tr>
+		    </thead>
+		    <tbody>
+			{{ range .Repositories }}
+			    <tr>
+				<td>
+				    <a href="{{ .HTMLUrl }}">{{ .Name }}</a>
+				</td>
+				{{ with .Owner }}
+				    <td>
+					<a href="{{ .HTMLUrl }}">{{ .Username }}</a>
+				    </td>
+				{{ end }}
+				<td class="text-truncate">{{ .Description }}</td>
+			    </tr>
+			{{ end }}
+		    </tbody>
+		</table>
+	    {{ else }}
+		<p class="text-center">Wow. Such empty</p>
+	    {{ end }}
+	</div>
+    </div>
+{{ end }}

@@ -48,9 +48,31 @@ type Owner struct {
 }
 
 type templateData struct {
-	Repositories *[]Repository
-	Query        string
-	TotalCount   int
+	Repositories    *[]Repository
+	Query           string
+	TotalCount      int
+	LanguageOptions map[string]string
+	SortOptions     map[string]string
+	SelectedLang    string
+	SelectedSort    string
+}
+
+var languageOptions = map[string]string{
+	"python":     "Python",
+	"javascript": "JavaScript",
+	"java":       "Java",
+	"c":          "C",
+	"cpp":        "C++",
+	"ruby":       "Ruby",
+	"go":         "Go",
+	"swift":      "Swift",
+}
+
+var sortOptions = map[string]string{
+	"stars":              "Stars",
+	"forks":              "Forks",
+	"help-wanted-issues": "Help Wanted",
+	"updated":            "Updated",
 }
 
 const RepositorySearchUrl = "https://api.github.com/search/repositories"
@@ -112,12 +134,26 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		app.serverError(w, fmt.Errorf("%s is not allowed for this endpoint", r.Method))
 		return
 	}
-	var td templateData
-	var buf = new(bytes.Buffer)
+	var td = templateData{
+		LanguageOptions: languageOptions,
+		SortOptions:     sortOptions,
+		SelectedLang:    "",
+		SelectedSort:    "",
+	}
+
 	var results *RepositorySearchResult
 	q := r.URL.Query().Get("q")
 
-	files := []string{"./templates/home.page.tmpl", "./templates/base.layout.tmpl"}
+	var files []string
+	if r.Header.Get("HX-Request") == "true" {
+		files = []string{"./templates/body.partial.tmpl"}
+	} else {
+		files = []string{
+			"./templates/home.page.tmpl",
+			"./templates/base.layout.tmpl",
+			"./templates/body.partial.tmpl",
+		}
+	}
 	ts, err := template.ParseFiles(files...)
 	if err != nil {
 		app.serverError(w, err)
@@ -130,6 +166,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		lang := r.URL.Query().Get("lang")
 		if lang != "" {
 			search = append(search, fmt.Sprintf("language:%s", lang))
+			td.SelectedLang = lang
 		}
 
 		query := url.Values{}
@@ -139,6 +176,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		sort := r.URL.Query().Get("sort")
 		if sort != "" {
 			query.Add("sort", sort)
+			td.SelectedSort = sort
 		}
 
 		results, err = fetchRepos(query.Encode())
@@ -153,8 +191,17 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		app.infoLog.Printf("found %d repositories for search: '%s'\n", results.TotalCount, query.Encode())
 	}
 
-	err = ts.Execute(buf, td)
-	if err != nil {
+	var buf = new(bytes.Buffer)
+	var tmplErr error
+
+	// Whether to render the full page or a partial template based on htmx headers
+	if r.Header.Get("HX-Request") == "true" {
+		tmplErr = ts.ExecuteTemplate(buf, "body", td)
+	} else {
+		tmplErr = ts.Execute(buf, td)
+	}
+
+	if tmplErr != nil {
 		app.serverError(w, err)
 		return
 	}
@@ -178,5 +225,6 @@ func (app *application) logRequest(next http.Handler) http.Handler {
 func (app *application) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", app.home)
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 	return app.logRequest(mux)
 }
