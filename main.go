@@ -139,7 +139,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		LanguageOptions: languageOptions,
 		SortOptions:     sortOptions,
 		SelectedLang:    "",
-		SelectedSort:    "",
+		SelectedSort:    "stars",
 	}
 
 	var results *RepositorySearchResult
@@ -164,8 +164,10 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if q != "" {
-		search := []string{q}
-		// Populate the qualifiers based on the syntax for search on Github
+		// Populate the qualifiers based on the syntax for search
+		// on Github. See https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories
+
+		search := []string{q, "in:name"} // Search by repository name
 		lang := r.URL.Query().Get("lang")
 		if lang != "" {
 			search = append(search, fmt.Sprintf("language:%s", lang))
