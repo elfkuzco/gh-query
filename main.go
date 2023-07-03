@@ -78,6 +78,17 @@ var sortOptions = map[string]string{
 
 const RepositorySearchUrl = "https://api.github.com/search/repositories"
 
+func humanizeCount(count int) string {
+	if count/1000 > 0 {
+		return fmt.Sprintf("%.3gK", float64(count)/1000)
+	} else if count/1000000 > 0 {
+		return fmt.Sprintf("%.3gM", float64(count)/1000000)
+	}
+	return fmt.Sprintf("%d", count)
+}
+
+var functions = template.FuncMap{"humanizeCount": humanizeCount}
+
 func main() {
 	addr := flag.String("addr", ":5000", "HTTP network address")
 	flag.Parse()
@@ -145,22 +156,29 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	var results *RepositorySearchResult
 	q := r.URL.Query().Get("q")
 
+	var ts *template.Template
 	var files []string
+	var err error
 	// Load all the templates or just the template with the
 	// results depending on the HTMX request headers
 	if r.Header.Get("HX-Request") == "true" {
 		files = []string{"./templates/body.partial.tmpl"}
+		ts, err = template.New("body.partial.tmpl").Funcs(functions).ParseFiles(files...)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
 	} else {
 		files = []string{
 			"./templates/home.page.tmpl",
 			"./templates/base.layout.tmpl",
 			"./templates/body.partial.tmpl",
 		}
-	}
-	ts, err := template.ParseFiles(files...)
-	if err != nil {
-		app.serverError(w, err)
-		return
+		ts, err = template.New("home.page.tmpl").Funcs(functions).ParseFiles(files...)
+		if err != nil {
+			app.serverError(w, err)
+			return
+		}
 	}
 
 	if q != "" {
