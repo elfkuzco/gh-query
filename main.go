@@ -39,6 +39,7 @@ type Repository struct {
 	Disabled        bool
 	Private         bool
 	CreatedAt       time.Time `json:"created_at"`
+	Stars           int       `json:"stargazers_count"`
 }
 
 type Owner struct {
@@ -145,6 +146,8 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 
 	var files []string
+	// Load all the templates or just the template with the
+	// results depending on the HTMX request headers
 	if r.Header.Get("HX-Request") == "true" {
 		files = []string{"./templates/body.partial.tmpl"}
 	} else {
