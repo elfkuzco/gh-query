@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -50,12 +52,15 @@ type Owner struct {
 
 type templateData struct {
 	Repositories    *[]Repository
+	LastRepository  *Repository // for keeping track of last repository in a fetch operation. used as target for adding infinte scroll htmx listener
 	Query           string
 	TotalCount      int
 	LanguageOptions map[string]string
 	SortOptions     map[string]string
 	SelectedLang    string
 	SelectedSort    string
+	NextPage        int
+	NextPageUrl     string
 }
 
 var languageOptions = map[string]string{
@@ -77,6 +82,8 @@ var sortOptions = map[string]string{
 }
 
 const RepositorySearchUrl = "https://api.github.com/search/repositories"
+
+const resultsPerPage = 50
 
 func humanizeCount(count int) string {
 	if count/1000 > 0 {
@@ -150,7 +157,8 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		LanguageOptions: languageOptions,
 		SortOptions:     sortOptions,
 		SelectedLang:    "",
-		SelectedSort:    "stars",
+		SelectedSort:    "stars", // default sort property
+		NextPageUrl:     "",
 	}
 
 	var results *RepositorySearchResult
@@ -159,6 +167,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	var ts *template.Template
 	var files []string
 	var err error
+
 	// Load all the templates or just the template with the
 	// results depending on the HTMX request headers
 	if r.Header.Get("HX-Request") == "true" {
@@ -194,6 +203,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 
 		query := url.Values{}
 		query.Add("q", strings.Join(search, " "))
+		query.Add("per_page", fmt.Sprintf("%d", resultsPerPage))
 
 		// Add the other query parameters tot the query string
 		sort := r.URL.Query().Get("sort")
@@ -201,6 +211,20 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 			query.Add("sort", sort)
 			td.SelectedSort = sort
 		}
+
+		// the current page to fetch, default to 1 if page is
+		// not a valid number
+		var page int
+		pg := r.URL.Query().Get("page")
+		if pg != "" {
+			page, err = strconv.Atoi(pg)
+			if err != nil {
+				page = 1
+			}
+		} else {
+			page = 1
+		}
+		query.Add("page", fmt.Sprintf("%d", page))
 
 		results, err = fetchRepos(query.Encode())
 		if err != nil {
@@ -212,6 +236,16 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		td.Repositories = results.Items
 		td.TotalCount = results.TotalCount
 		app.infoLog.Printf("found %d repositories for search: '%s'\n", results.TotalCount, query.Encode())
+		// Determine the next page to fetch
+		numPages := int(math.Ceil(float64(td.TotalCount) / resultsPerPage))
+		if page < numPages {
+			td.NextPage = page + 1
+			v := *results.Items
+			td.LastRepository = &(v[len(v)-1])
+			query.Set("page", fmt.Sprintf("%d", td.NextPage))
+			td.NextPageUrl = query.Encode()
+		}
+
 	}
 
 	var buf = new(bytes.Buffer)
@@ -219,7 +253,11 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 
 	// Whether to render the full page or a partial template based on htmx headers
 	if r.Header.Get("HX-Request") == "true" {
-		tmplErr = ts.ExecuteTemplate(buf, "body", td)
+		if r.URL.Query().Get("skip_table_header") != "" {
+			tmplErr = ts.ExecuteTemplate(buf, "results", td)
+		} else {
+			tmplErr = ts.ExecuteTemplate(buf, "body", td)
+		}
 	} else {
 		tmplErr = ts.Execute(buf, td)
 	}
