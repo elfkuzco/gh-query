@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -14,7 +13,8 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"time"
+
+	ghquery "github.com/elfkuzco/gh-query"
 )
 
 type application struct {
@@ -22,37 +22,9 @@ type application struct {
 	infoLog  *log.Logger
 }
 
-type RepositorySearchResult struct {
-	TotalCount        int  `json:"total_count"`
-	IncompleteResults bool `json:"incomplete_results"`
-	Items             *[]Repository
-}
-
-type Repository struct {
-	ID              int
-	Name            string
-	FullName        string `json:"full_name"`
-	Owner           *Owner
-	HTMLUrl         string `json:"html_url"`
-	Description     string
-	Language        string
-	OpenIssuesCount int `json:"open_issues_count"`
-	Archived        bool
-	Disabled        bool
-	Private         bool
-	CreatedAt       time.Time `json:"created_at"`
-	Stars           int       `json:"stargazers_count"`
-}
-
-type Owner struct {
-	Username  string `json:"login"`
-	AvatarUrl string `json:"avatar_url"`
-	HTMLUrl   string `json:"url"`
-}
-
 type templateData struct {
-	Repositories    *[]Repository
-	LastRepository  *Repository // for keeping track of last repository in a fetch operation. used as target for adding infinte scroll htmx listener
+	Repositories    *[]ghquery.Repository
+	LastRepository  *ghquery.Repository // for keeping track of last repository in a fetch operation. used as target for adding infinte scroll htmx listener
 	Query           string
 	TotalCount      int
 	LanguageOptions map[string]string
@@ -63,27 +35,7 @@ type templateData struct {
 	NextPageUrl     string
 }
 
-var languageOptions = map[string]string{
-	"python":     "Python",
-	"javascript": "JavaScript",
-	"java":       "Java",
-	"c":          "C",
-	"cpp":        "C++",
-	"ruby":       "Ruby",
-	"go":         "Go",
-	"swift":      "Swift",
-}
-
-var sortOptions = map[string]string{
-	"stars":              "Stars",
-	"forks":              "Forks",
-	"help-wanted-issues": "Help Wanted",
-	"updated":            "Updated",
-}
-
-const RepositorySearchUrl = "https://api.github.com/search/repositories"
-
-const resultsPerPage = 50
+var resultsPerPage = 50
 
 func humanizeCount(count int) string {
 	if count/1000 > 0 {
@@ -119,49 +71,20 @@ func main() {
 	err := srv.ListenAndServe()
 	errorLog.Fatal(err)
 }
-
-func fetchRepos(query string) (*RepositorySearchResult, error) {
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", RepositorySearchUrl+"?"+query, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search for query '%s' failed with status: %s", query, resp.Status)
-	}
-
-	var result RepositorySearchResult
-	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-}
-
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		app.serverError(w, fmt.Errorf("%s is not allowed for this endpoint", r.Method))
 		return
 	}
 	var td = templateData{
-		LanguageOptions: languageOptions,
-		SortOptions:     sortOptions,
+		LanguageOptions: ghquery.LanguageOptions,
+		SortOptions:     ghquery.SortOptions,
 		SelectedLang:    "",
 		SelectedSort:    "stars", // default sort property
 		NextPageUrl:     "",
 	}
 
-	var results *RepositorySearchResult
+	var results *ghquery.RepositorySearchResult
 	q := r.URL.Query().Get("q")
 
 	var ts *template.Template
@@ -226,7 +149,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Add("page", fmt.Sprintf("%d", page))
 
-		results, err = fetchRepos(query.Encode())
+		results, err = ghquery.FetchRepos(query.Encode())
 		if err != nil {
 			app.serverError(w, err)
 			return
@@ -237,7 +160,7 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 		td.TotalCount = results.TotalCount
 		app.infoLog.Printf("found %d repositories for search: '%s'\n", results.TotalCount, query.Encode())
 		// Determine the next page to fetch
-		numPages := int(math.Ceil(float64(td.TotalCount) / resultsPerPage))
+		numPages := int(math.Ceil(float64(td.TotalCount) / float64(resultsPerPage)))
 		if page < numPages {
 			td.NextPage = page + 1
 			v := *results.Items
@@ -245,7 +168,6 @@ func (app *application) home(w http.ResponseWriter, r *http.Request) {
 			query.Set("page", fmt.Sprintf("%d", td.NextPage))
 			td.NextPageUrl = query.Encode()
 		}
-
 	}
 
 	var buf = new(bytes.Buffer)
