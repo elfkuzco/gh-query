@@ -1,3 +1,3 @@
 # ABOUT
 
-This is a simple web app that allows you to search for repositories on Github
+This is a simple program that allows you to search for repositories on Github
