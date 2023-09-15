@@ -51,3 +51,10 @@ var SortOptions = Options{
 	"help-wanted-issues": "Help Wanted",
 	"updated":            "Updated",
 }
+
+var ScopeOptions = Options{
+	"name":        "name",
+	"description": "description",
+	"topics":      "topics",
+	"readme":      "readme",
+}
